@@ -10,6 +10,34 @@ from typing import List, Optional
 from model_integration.controller import get_labels_for_text
 import traceback
 from util.notification import send_project_update
+import shap
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, ZeroShotClassificationPipeline
+import time
+from typing import Union, List
+import numpy as np
+
+class MyZeroShotClassificationPipeline(ZeroShotClassificationPipeline):
+    # Overwrite the __call__ method
+    def __call__(self, *args):
+        o = super().__call__(args[0], self.workaround_labels)
+        #   o = super().__call__(args[0], self.workaround_labels)[0]
+
+        return [[{"label":x[0], "score": x[1]} for x in zip(p["labels"], p["scores"])] for p in o]
+
+    def set_labels_workaround(self, labels: Union[str,List[str]]):
+        self.workaround_labels = labels
+
+def score(pipe, text):
+
+    if isinstance(text, str):
+        text = [text]
+
+    prediction = pipe(text)
+
+    explainer = shap.Explainer(pipe)
+    shap_values = explainer(text)
+
+    return prediction, shap_values
 
 
 def zero_shot_project(project_id: str, payload_id: str):
@@ -34,6 +62,20 @@ def zero_shot_project(project_id: str, payload_id: str):
         label_dict = {l[0]: l[1] for l in zip(config.label_names, config.label_ids)}
         count = 0
         is_cancelled = False
+
+        # Config for the model
+        model = AutoModelForSequenceClassification.from_pretrained(config.config)
+        tokenizer = AutoTokenizer.from_pretrained(config.config)
+
+        # label_names = ['sports', 'politics', 'science', 'business']
+
+        model.config.label2id.update({v:k for k,v in enumerate(config.label_names)})
+        model.config.id2label.update({k:v for k,v in enumerate(config.label_names)})
+
+        pipe = MyZeroShotClassificationPipeline(model=model, tokenizer=tokenizer, return_all_scores=True)
+        pipe.set_labels_workaround(config.label_names)
+        explainer = shap.Explainer(pipe)
+
         for batch in record_batches:
             if count % 10 == 0:
                 session_token = general.remove_and_refresh_session(session_token, True)
@@ -47,27 +89,62 @@ def zero_shot_project(project_id: str, payload_id: str):
             text_data = record.get_record_data_for_id_group(
                 project_id, batch, config.attribute_name
             )
+
+            # prediction, shap_values = score(pipe, list(text_data.values())[:2])
+
             for key in text_data:
-                result = get_zero_shot_labels(
-                    project_id,
-                    config.config,
-                    config.label_names,
-                    text_data[key],
-                    config.run_individually,
-                )
-                if result[0][1] > config.min_confidence:
+                # result = get_zero_shot_labels(
+                #     project_id,
+                #     config.config,
+                #     config.label_names,
+                #     text_data[key],
+                #     config.run_individually,
+                # )
+
+                text = text_data[key]
+
+                # start = time.time()
+                shap_values = explainer([text])
+                # end = time.time()
+                # print(f"Time for shap: {end-start}")
+                
+                values = np.array([row[:len(config.label_names)] for row in shap_values.values.squeeze()])
+                base = shap_values.base_values.squeeze()[:len(config.label_names)]
+
+                prediction = values.sum(axis=0) + base 
+
+                confidence = max(prediction)
+                label = config.label_names[prediction.argmax()]
+                
+                if confidence > config.min_confidence:
                     record_label_association.create(
                         project_id=project_id,
                         record_id=key,
                         source_id=config.source_id,
                         source_type="INFORMATION_SOURCE",
                         return_type=enums.InformationSourceReturnType.RETURN.value,
-                        confidence=result[0][1],
+                        confidence=confidence,
+                        shap = {'values': values.tolist(),
+                                'base_values': base.tolist()},
                         created_by=config.created_by,
-                        labeling_task_label_id=label_dict[result[0][0]],
+                        labeling_task_label_id=label_dict[label],
                         is_gold_star=False,
                         with_commit=None,
                     )
+
+                # if result[0][1] > config.min_confidence:
+                #     record_label_association.create(
+                #         project_id=project_id,
+                #         record_id=key,
+                #         source_id=config.source_id,
+                #         source_type="INFORMATION_SOURCE",
+                #         return_type=enums.InformationSourceReturnType.RETURN.value,
+                #         confidence=result[0][1],
+                #         created_by=config.created_by,
+                #         labeling_task_label_id=label_dict[result[0][0]],
+                #         is_gold_star=False,
+                #         with_commit=None,
+                #     )
 
             if information_source.continue_payload(
                 project_id, config.source_id, payload_id

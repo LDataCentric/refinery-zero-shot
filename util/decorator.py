@@ -51,7 +51,7 @@ class param_throttle(object):
             first_param = args[0]
             if first_param in self.time_of_last_call:
                 time_since_last_call = now - self.time_of_last_call[first_param]
-                call = True if time_since_last_call > self.throttle_period else False
+                call = time_since_last_call > self.throttle_period
             else:
                 call = True
             if call:

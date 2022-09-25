@@ -11,10 +11,7 @@ def send_project_update(project_id, message, is_global=False):
         )
         return
 
-    if is_global:
-        message = f"GLOBAL:{message}"
-    else:
-        message = f"{project_id}:{message}"
+    message = f"GLOBAL:{message}" if is_global else f"{project_id}:{message}"
     project_item = project.get(project_id)
     organization_id = str(project_item.organization_id)
     req = requests.post(
