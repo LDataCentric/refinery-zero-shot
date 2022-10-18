@@ -1,6 +1,8 @@
 #!/bin/bash
 trap "echo -ne '\nstopping container...' && docker stop refinery-zero-shot > /dev/null 2>&1 && echo -ne '\t\t [done]\n'" EXIT
 
+source check_config_service
+
 HOST_IP=$(docker network inspect bridge --format='{{json .IPAM.Config}}' | grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | tail -1)
 
 echo -ne 'stopping old container...'
@@ -11,14 +13,30 @@ echo -ne 'building container...'
 docker build -t refinery-zero-shot-dev -f dev.Dockerfile . > /dev/null 2>&1
 echo -ne '\t\t [done]\n'
 
+MODEL_DIR=${PWD%/*}/dev-setup/model-data/
+if [ ! -d "$MODEL_DIR" ] 
+then
+    MODEL_DIR=${PWD%/*/*}/dev-setup/model-data/
+    if [ ! -d "$MODEL_DIR" ] 
+    then
+        # to include volume for local development, use the dev-setup model data folder:  
+        # alternative use manual logic with
+        # -v /path/to/dev-setup/model-data:/models \
+        echo "Can't find model data directory: $MODEL_DIR -> stopping" 
+        exit 1
+    fi
+fi
+
 echo -ne 'starting...'
 docker run -d --rm \
 --name refinery-zero-shot \
 -p 7064:80 \
 -e POSTGRES=postgresql://postgres:onetask@graphql-postgres:5432 \
 -e WS_NOTIFY_ENDPOINT="http://refinery-websocket:8080" \
+-e MODEL_PROVIDER=http://refinery-model-provider:80 \
 --mount type=bind,source="$(pwd)"/,target=/app \
 -v /var/run/docker.sock:/var/run/docker.sock \
+-v "$MODEL_DIR":/models \
 --network dev-setup_default \
 refinery-zero-shot-dev > /dev/null 2>&1
 echo -ne '\t\t\t [done]\n'

@@ -1,7 +1,8 @@
 import threading
+from typing import Callable
 
 
-def run(target, *args, **kwargs):
+def run(target: Callable, *args, **kwargs) -> None:
     threading.Thread(
         target=target,
         args=args,

@@ -2,6 +2,8 @@ import torch
 from transformers import Pipeline, pipeline
 from typing import List, Dict, Any, Optional
 from ..util import lookup_hypothesis
+from util.config_handler import get_config_value
+from util.connector import get_model_path
 from util.notification import send_project_update
 
 __classifier = {}
@@ -38,12 +40,17 @@ def __has_classifier(config: str) -> bool:
 def __get_classifier(config: str) -> Pipeline:
     global __classifier
     if config not in __classifier:
+        if get_config_value("is_managed"):
+            model = get_model_path(config)
+        else:
+            model = config
+
         if torch.cuda.is_available():
             __classifier[config] = pipeline(
-                "zero-shot-classification", model=config, device=0
+                "zero-shot-classification", model=model, device=0
             )
         else:
-            __classifier[config] = pipeline("zero-shot-classification", model=config)
+            __classifier[config] = pipeline("zero-shot-classification", model=model)
     return __classifier[config]
 
 
