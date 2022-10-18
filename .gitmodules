@@ -1,3 +1,3 @@
 [submodule "submodules/model"]
 	path = submodules/model
-	url = https://github.com/code-kern-ai/refinery-submodule-model.git
+	url = https://github.com/LDataCentric/refinery-submodule-model.git
